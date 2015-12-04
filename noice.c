@@ -72,6 +72,7 @@ struct key {
 	enum action act; /* Action */
 	char *run;       /* Program to run */
 	char *env;       /* Environment variable to run */
+	char *args;	 /* Extra program arguments */
 };
 
 #include "config.h"
@@ -183,7 +184,7 @@ xdirname(const char *path)
 }
 
 void
-spawn(const char *file, const char *arg, const char *dir)
+spawn(const char *file, const char *arg, const char *dir, const char *args)
 {
 	pid_t pid;
 	int status;
@@ -192,7 +193,10 @@ spawn(const char *file, const char *arg, const char *dir)
 	if (pid == 0) {
 		if (dir != NULL)
 			chdir(dir);
-		execlp(file, file, arg, NULL);
+		if (args != NULL)
+			execlp(file, file, args, arg, NULL);
+		else
+			execlp(file, file, arg, NULL);
 		_exit(1);
 	} else {
 		/* Ignore interruptions */
@@ -349,7 +353,7 @@ printprompt(char *str)
 /* Returns SEL_* if key is bound and 0 otherwise
    Also modifies the run and env pointers (used on SEL_{RUN,RUNARG}) */
 int
-nextsel(char **run, char **env)
+nextsel(char **run, char **env, char **args)
 {
 	int c, i;
 
@@ -363,6 +367,7 @@ nextsel(char **run, char **env)
 		if (c == bindings[i].sym) {
 			*run = bindings[i].run;
 			*env = bindings[i].env;
+			*args = bindings[i].args;
 			return bindings[i].act;
 		}
 
@@ -691,7 +696,7 @@ browse(const char *ipath, const char *ifilter)
 	regex_t re;
 	char *newpath;
 	struct stat sb;
-	char *name, *bin, *dir, *tmp, *run, *env;
+	char *name, *bin, *dir, *tmp, *run, *env, *args;
 	int nowtyping = 0;
 
 	oldpath = NULL;
@@ -714,7 +719,7 @@ begin:
 		if (nowtyping)
 			goto moretyping;
 nochange:
-		switch (nextsel(&run, &env)) {
+		switch (nextsel(&run, &env, &args)) {
 		case SEL_QUIT:
 			free(path);
 			free(fltr);
@@ -786,7 +791,7 @@ nochange:
 					goto nochange;
 				}
 				exitcurses();
-				spawn(bin, newpath, NULL);
+				spawn(bin, newpath, NULL, NULL);
 				initcurses();
 				free(newpath);
 				continue;
@@ -924,14 +929,14 @@ moretyping:
 		case SEL_RUN:
 			run = xgetenv(env, run);
 			exitcurses();
-			spawn(run, NULL, path);
+			spawn(run, NULL, path, args);
 			initcurses();
 			break;
 		case SEL_RUNARG:
 			name = dents[cur].name;
 			run = xgetenv(env, run);
 			exitcurses();
-			spawn(run, name, path);
+			spawn(run, name, path, args);
 			initcurses();
 			break;
 		case SEL_TOGGLEDOT:
@@ -948,7 +953,7 @@ moretyping:
 		if (idletimeout != 0 && idle == idletimeout) {
 			idle = 0;
 			exitcurses();
-			spawn(idlecmd, NULL, NULL);
+			spawn(idlecmd, NULL, NULL, NULL);
 			initcurses();
 		}
 	}
