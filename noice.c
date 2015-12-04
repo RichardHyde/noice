@@ -38,6 +38,7 @@
 #define MIN(x, y) ((x) < (y) ? (x) : (y))
 #define ISODD(x) ((x) & 1)
 #define CONTROL(c) ((c) ^ 0x40)
+#define SHIFT(c) ((c) ^ 0x10)
 
 struct assoc {
 	char *regex; /* Regex to match on filename */
