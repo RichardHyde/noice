@@ -71,4 +71,5 @@ struct key bindings[] = {
 	/* Run command with argument */
 	{ 'e',            SEL_RUNARG, "vi", "EDITOR" },
 	{ 'p',            SEL_RUNARG, "less", "PAGER" },
+	{ 'T',		  SEL_RUNARG, "tail", "TAIL", "-f" } , 
 };
