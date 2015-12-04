@@ -58,7 +58,10 @@ struct key bindings[] = {
 	{ '$',            SEL_END },
 	/* Change dir */
 	{ 'c',            SEL_CD },
+	{ '#',		  SEL_CDHOME },
 	{ '~',		  SEL_CDHOME },
+	/* Toggle hide .dot files */
+	{ '.',		  SEL_TOGGLEDOT },
 	/* Toggle sort by time */
 	{ 't',            SEL_MTIME },
 	{ CONTROL('L'),   SEL_REDRAW },

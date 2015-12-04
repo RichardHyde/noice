@@ -58,10 +58,12 @@ enum action {
 	SEL_HOME,
 	SEL_END,
 	SEL_CD,
+	SEL_CDHOME,
 	SEL_MTIME,
 	SEL_REDRAW,
 	SEL_RUN,
 	SEL_RUNARG,
+	SEL_TOGGLEDOT,
 };
 
 struct key {
@@ -77,6 +79,7 @@ struct entry {
 	char *name;
 	mode_t mode;
 	time_t t;
+	unsigned long size;
 };
 
 /* Global context */
@@ -85,6 +88,7 @@ int n, cur;
 char *path, *oldpath;
 char *fltr;
 int idle;
+unsigned long totalsize;
 
 /*
  * Layout:
@@ -107,6 +111,8 @@ void printmsg(char *);
 void printwarn(void);
 void printerr(int, char *);
 char *mkpath(char *, char *);
+char *printsize(unsigned long size);
+char filemode(mode_t mod);
 
 #undef dprintf
 int
@@ -306,6 +312,24 @@ printerr(int ret, char *prefix)
 	exit(ret);
 }
 
+/* Return the size to print in human readable form */
+char *printsize(unsigned long size)
+{
+	float printsize = (float)size;
+	char *strsize;
+	int lcount = 0;
+	char units[5] = {'B','K','M','G','T'};
+	
+	while (printsize > 1024 && lcount < 4) {
+		printsize = printsize / 1024;
+		lcount++;
+	}
+
+	strsize = malloc(15);
+	sprintf(strsize, "%12.3f%c", printsize, units[lcount]);
+	return(strsize);
+}
+
 /* Clear the last line */
 void
 clearprompt(void)
@@ -424,41 +448,58 @@ canopendir(char *path)
 	return 1;
 }
 
+char filemode(mode_t mod)
+{
+	char cm=0;
+
+	if (S_ISDIR(mod)) {
+		cm = '/';
+	} else if (S_ISLNK(mod)) {
+		cm = '@';
+	} else if (S_ISSOCK(mod)) {
+		cm = '=';
+	} else if (S_ISFIFO(mod)) {
+		cm = '|';
+	} else if (mod & S_IXUSR) {
+		cm = '*';
+	}
+
+	return cm;
+}
+
 void
 printent(struct entry *ent, int active)
 {
-	char *name;
-	unsigned int maxlen = COLS - strlen(CURSR) - 1;
+	char *name, *size;
+	unsigned int maxlen = COLS - strlen(CURSR) - 17;
 	char cm = 0;
+	int row, col;
+
+	getyx(stdscr, row, col);
 
 	/* Copy name locally */
 	name = xstrdup(ent->name);
 
-	if (S_ISDIR(ent->mode)) {
-		cm = '/';
+	if ((cm = filemode(ent->mode)) != 0)
 		maxlen--;
-	} else if (S_ISLNK(ent->mode)) {
-		cm = '@';
-		maxlen--;
-	} else if (S_ISSOCK(ent->mode)) {
-		cm = '=';
-		maxlen--;
-	} else if (S_ISFIFO(ent->mode)) {
-		cm = '|';
-		maxlen--;
-	} else if (ent->mode & S_IXUSR) {
-		cm = '*';
-		maxlen--;
-	}
 
 	/* No text wrapping in entries */
 	if (strlen(name) > maxlen)
 		name[maxlen] = '\0';
 
 	if (cm == 0)
-		printw("%s%s\n", active ? CURSR : EMPTY, name);
+		mvprintw(row, 0, "%s%s", active ? CURSR : EMPTY, name);
 	else
-		printw("%s%s%c\n", active ? CURSR : EMPTY, name, cm);
+		mvprintw(row, 0, "%s%s%c", active ? CURSR : EMPTY, name, cm);
+
+	if (cm == 0 || cm == '*')
+	{
+		size = printsize(ent->size);
+		mvprintw(row, COLS-16, "%s\n", size);
+		free(size);
+	}
+	else
+		printw("\n");
 
 	free(name);
 }
@@ -473,6 +514,7 @@ dentfill(char *path, struct entry **dents,
 	char *newpath;
 	int r, n = 0;
 
+	totalsize = 0;
 	dirp = opendir(path);
 	if (dirp == NULL)
 		return 0;
@@ -493,6 +535,10 @@ dentfill(char *path, struct entry **dents,
 			printerr(1, "lstat");
 		(*dents)[n].mode = sb.st_mode;
 		(*dents)[n].t = sb.st_mtime;
+		(*dents)[n].size = sb.st_size;
+
+		if (filemode(sb.st_mode) == 0 | filemode(sb.st_mode) == '*')
+			totalsize += sb.st_size;
 		n++;
 	}
 
@@ -619,7 +665,8 @@ redraw(void)
 	strlcpy(cwd, path, COLS * sizeof(char));
 	cwd[COLS - strlen(CWD) - 1] = '\0';
 
-	printw(CWD "%s\n\n", cwd);
+	printw(CWD "%s", cwd);
+	mvprintw(0, COLS-16, "%s\n\n", printsize(totalsize));
 
 	/* Print listing */
 	odd = ISODD(nlines);
@@ -843,6 +890,25 @@ moretyping:
 			fltr = xstrdup(ifilter); /* Reset filter */
 			DPRINTF_S(path);
 			goto begin;
+		case SEL_CDHOME:
+			tmp = getenv("HOME");
+			if (tmp == NULL) {
+				clearprompt();
+				goto nochange;
+			}
+			newpath = mkpath(path, tmp);
+			if (canopendir(newpath) == 0) {
+				free(newpath);
+				printwarn();
+				goto nochange;
+			}
+			free(oldpath);
+			oldpath = path;
+			path = newpath;
+			free(fltr);
+			fltr = xstrdup(ifilter); /* Reset filter */
+			DPRINTF_S(path);
+			goto begin;	
 		case SEL_MTIME:
 			mtimeorder = !mtimeorder;
 			/* Save current */
@@ -867,6 +933,15 @@ moretyping:
 			spawn(run, name, path);
 			initcurses();
 			break;
+		case SEL_TOGGLEDOT:
+			if (strcmp(fltr, ifilter) != 0) {
+				free(fltr);
+				fltr = xstrdup(ifilter); /* Reset filter */
+			} else {
+				free(fltr);
+				fltr = xstrdup(".");
+			}
+			goto begin;
 		}
 		/* Screensaver */
 		if (idletimeout != 0 && idle == idletimeout) {
@@ -893,6 +968,10 @@ main(int argc, char *argv[])
 
 	if (argc > 2)
 		usage(argv[0]);
+#ifdef DEBUG
+	fprintf(stderr, "Debugging on\n");
+#endif
+
 
 	/* Confirm we are in a terminal */
 	if (!isatty(0) || !isatty(1)) {
